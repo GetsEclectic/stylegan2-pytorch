@@ -564,8 +564,8 @@ class StyleGAN2(nn.Module):
         set_requires_grad(self.GE, False)
 
         generator_params = list(self.G.parameters()) + list(self.S.parameters())
-        self.G_opt = AdamP(generator_params, lr = self.lr, betas=(0.5, 0.9))
-        self.D_opt = AdamP(self.D.parameters(), lr = self.lr * ttur_mult, betas=(0.5, 0.9))
+        self.G_opt = torch.optim.Adam(generator_params, lr = self.lr, betas=(0, 0.99))
+        self.D_opt = torch.optim.Adam(self.D.parameters(), lr = self.lr * ttur_mult, betas=(0, 0.99))
 
         self._init_weights()
         self.reset_parameter_averaging()
@@ -752,18 +752,18 @@ class Trainer():
             image_batch.requires_grad_()
             real_output, real_q_loss = self.GAN.D_aug(image_batch, prob = aug_prob)
 
-            divergence = (F.relu(1 + real_output) + F.relu(1 - fake_output)).mean()
+            # divergence = (F.relu(1 + real_output) + F.relu(1 - fake_output)).mean()
+            divergence = -real_output.mean() + fake_output.mean()
             disc_loss = divergence
 
             quantize_loss = (fake_q_loss + real_q_loss).mean()
             self.q_loss = float(quantize_loss.detach().item())
 
-            disc_loss = disc_loss + quantize_loss
+            # disc_loss = disc_loss + quantize_loss
 
-            if apply_gradient_penalty:
-                gp = gradient_penalty(image_batch, real_output)
-                self.last_gp_loss = gp.clone().detach().item()
-                disc_loss = disc_loss + gp
+            gp = gradient_penalty(image_batch, real_output)
+            self.last_gp_loss = gp.clone().detach().item()
+            disc_loss = disc_loss + gp
 
             disc_loss = disc_loss / self.gradient_accumulate_every
             disc_loss.register_hook(raise_if_nan)
@@ -786,17 +786,17 @@ class Trainer():
 
             generated_images = self.GAN.G(w_styles, noise)
             fake_output, _ = self.GAN.D_aug(generated_images, prob = aug_prob)
-            loss = fake_output.mean()
+            loss = -fake_output.mean()
             gen_loss = loss
 
-            if apply_path_penalty:
-                pl_lengths = calc_pl_lengths(w_styles, generated_images)
-                avg_pl_length = np.mean(pl_lengths.detach().cpu().numpy())
-
-                if not is_empty(self.pl_mean):
-                    pl_loss = ((pl_lengths - self.pl_mean) ** 2).mean()
-                    if not torch.isnan(pl_loss):
-                        gen_loss = gen_loss + pl_loss
+            # if apply_path_penalty:
+            #     pl_lengths = calc_pl_lengths(w_styles, generated_images)
+            #     avg_pl_length = np.mean(pl_lengths.detach().cpu().numpy())
+            #
+            #     if not is_empty(self.pl_mean):
+            #         pl_loss = ((pl_lengths - self.pl_mean) ** 2).mean()
+            #         if not torch.isnan(pl_loss):
+            #             gen_loss = gen_loss + pl_loss
 
             gen_loss = gen_loss / self.gradient_accumulate_every
             gen_loss.register_hook(raise_if_nan)
@@ -809,9 +809,8 @@ class Trainer():
 
         # calculate moving averages
 
-        if apply_path_penalty and not np.isnan(avg_pl_length):
-            self.pl_mean = self.pl_length_ma.update_average(self.pl_mean, avg_pl_length)
-
+        # if apply_path_penalty and not np.isnan(avg_pl_length):
+        #     self.pl_mean = self.pl_length_ma.update_average(self.pl_mean, avg_pl_length)
         if self.steps % 10 == 0 and self.steps > 20000:
             self.GAN.EMA()
 
